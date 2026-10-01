@@ -2,7 +2,11 @@
 # Loom's ADR-016 (language profiles). The [lsp.gleam] table is exactly
 # what `loom.toml` would carry; installing this extension approves it,
 # and `loom ext check lsp_gleam` proves it against the project in
-# fixture/.
+# fixture/. docs/how-this-profile-works.md walks through every key below.
+#
+# `name` is what `loomd ext check` takes. `tier = "profile"` marks the
+# extension as data only: language-server tables and checks, and no tools,
+# hooks or network policy, which Loom would refuse.
 [extension]
 name = "lsp_gleam"
 version = "0.1.0"
@@ -27,8 +31,12 @@ project = "writable"
 # splits it.
 hint = "Qualify a name with its module as imported: probe.greet, or pkg/mod.name for a nested module"
 
-# The definition of a qualified name, found by searching the project and
-# narrowed by the module the qualifier names.
+# A check asks one question of the running server through the door Loom's
+# tools use, and `expect` lists the sites the answer must equal, as a set
+# of fixture-relative path:line: two hits on one line count once.
+#
+# This one asks for the definition of a qualified name, found by searching
+# the project and narrowed by the module the qualifier names.
 [[check]]
 server = "gleam"
 query = "definition"
@@ -36,7 +44,9 @@ symbol = "util.greet"
 expect = ["src/util.gleam:1"]
 
 # Every reference, asked from the definition: the declaration, the two
-# calls on one line of the other module, and the two in its own module.
+# calls on one line of the other module, and the two in its own module
+# (src/util.gleam:6 stands for both). It names a path and line, so it also
+# proves the form of a query that skips the search.
 [[check]]
 server = "gleam"
 query = "references"
