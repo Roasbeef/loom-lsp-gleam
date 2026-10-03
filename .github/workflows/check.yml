@@ -26,7 +26,7 @@ env:
   # The Loom revision this profile is proven against: a commit on Loom's
   # dependency-preparation branch implementing protocol 064. Re-pin this
   # after its merge before tagging this profile release.
-  LOOM_REV: 639df4db0e4896caca00da9435c8122478722624
+  LOOM_REV: 87d1c54ae3afdef75b151c21883d64612bc1b388
   # Copied from Loom's ci.yml.
   GLEAM_VERSION: "1.18.1"
   OTP_VERSION: "29.0.5"
