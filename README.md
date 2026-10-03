@@ -5,18 +5,37 @@ The Gleam language server, `gleam lsp`, as a Loom language profile
 [`docs/examples/loom.toml`](https://github.com/Roasbeef/loom/blob/main/docs/examples/loom.toml).
 
 ```sh
-loomd ext install https://github.com/Roasbeef/loom-lsp-gleam --rev v0.1.0
+loomd ext install https://github.com/Roasbeef/loom-lsp-gleam --rev codex/dependency-preparation
 loomd ext check lsp_gleam
 ```
 
+This 0.2.0 update requires Loom with protocol 064 (the dependency-preparation
+PR). The branch above is the review version; pin its reviewed commit when
+installing before a release tag exists. Older Loom versions refuse the new
+profile key rather than ignoring its authority.
+
 The host needs `gleam` on the daemon's `PATH` (or code mode's located
-toolchain, which a bare `gleam` means in a session) and `rg`, which a
-bare-name question searches the project with. The server writes
+toolchain, which a bare `gleam` means in a session). Bare-name questions also
+require `rg`; the shipped checks supply a path and line and need no search. The server writes
 `manifest.toml` and `build/` into the project, so the project is
-writable; it needs nothing outside it.
+writable. Before each cold start, Loom runs the same Gleam executable with
+`deps download` in that package. Installation explicitly approves full network
+access for this setup call, bounded by 60 seconds wall and CPU time and 1 MiB
+per output stream. The server itself stays offline.
+
+Setup and LSP share a private HOME and cache. A fresh worktree requires no
+manual dependency command. Workspace-local sibling packages remain readable
+only within the session's permissions. Changes to their configurations or the
+selected package's dependency records restart the server and rerun setup.
+Registry or dependency failures refuse startup with an actionable error; an
+offline server is never asked to finish the failed download.
+
+The previous v0.1.0 install keeps its existing authority. Update explicitly,
+then start a new Loom session. `loomd ext install` does not overwrite an existing
+name, so remove `lsp_gleam` before installing the reviewed update.
 
 `fixture/` is a two-module project, and the two `[[check]]`s in
-`extension.toml` are a qualified definition (`util.greet`) and the
+`extension.toml` are a definition at `src/util.gleam:1` and the
 references across both modules. A `loom.toml` table named `gleam`
 replaces this profile whole.
 

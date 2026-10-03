@@ -10,8 +10,7 @@ them so you can read `extension.toml` without having Loom's source open.
 For the machinery behind it, see Loom's
 [language-server architecture](https://github.com/Roasbeef/loom/blob/main/docs/architecture/lsp.md)
 and [ADR-016, language profiles](https://github.com/Roasbeef/loom/blob/main/docs/adr/016-language-profiles.md).
-The short version: Loom speaks the Language Server Protocol and knows no
-language. A server runs project code (`gleam lsp` compiles the project),
+Loom shares one Language Server Protocol client across profiles. A server runs project code (`gleam lsp` compiles the project),
 so Loom runs it inside a sandbox, and everything that sandbox must grant,
 plus the few facts a language spells differently, comes from a profile
 like this one.
@@ -28,8 +27,8 @@ Three rules shaped the file.
 
 The jail starts from nothing, so every grant in the table is there
 because something failed without it. The server writes `manifest.toml`
-and `build/` into the project it serves, so the project is writable. That
-is the only grant. The reason is that a language server runs project
+and `build/` into the project it serves, so the project is writable. Setup also receives explicitly approved networking for its finite downloader
+call, plus private cache writes. The language-server lease stays offline. The reason is that a language server runs project
 code, and a grant that is wider than the measurement is authority a
 hostile project can use.
 
@@ -82,24 +81,46 @@ directory of a file that holds a `gleam.toml` is the project root, and it
 is the root the server is started on. A file whose real location lies
 outside that root is refused before any request is sent.
 
-`project = "writable"` is the one grant this profile makes. The server
-compiles the project it serves and writes `manifest.toml` and `build/`
-into it, so a read-only project would fail to load. This is also why
-the profile asks for nothing else. A project with no dependencies reads
-nothing outside itself, and one with dependencies has them under
-`build/packages`, which is inside the project. So there are no
-`readable` or `writable` roots, no `cache_env` and no `env` names.
+`project = "writable"` permits the server to write `manifest.toml` and
+`build/` into its selected package. The lease reads workspace-local sibling
+packages only where the session already permits those reads. It does not grant
+writes to sibling source packages.
 
-`hint` is one line, appended once to `lsp_definition`'s description in
-sessions that configure this server. It tells the model to qualify a name
+`prepare = "gleam-dependencies"` authorizes a fixed `gleam deps download`
+invocation before a cold server start. Loom runs the same resolved executable
+with a separate, finite broker policy. Setup has full network access for at most
+60 seconds wall and CPU time; output is bounded to 1 MiB per stream. No arbitrary
+shell command is accepted. The actual `gleam lsp` lease remains network-off.
+
+`cache_env = { XDG_CACHE_HOME = "hex" }` selects a private writable cache under
+Loom's cache directory. Setup and LSP also use that directory as their private
+HOME. Linux Gleam uses XDG; macOS Gleam uses `HOME/Library/Caches`. Both therefore
+populate private archives without sharing the operator's cache or credentials.
+
+The first semantic query in a fresh worktree pays preparation automatically.
+The package's manifest and `build/packages/packages.toml` must be readable after
+setup. A failed registry request or incomplete setup prevents the server from
+starting and reports the selected package and downloader error. Waiting on the
+offline lease cannot complete a missing download.
+
+Loom fingerprints the selected package's dependency records and configurations
+through its workspace-local path dependency graph before reusing a server. A
+changed configuration evicts the old generation and reruns setup; ordinary
+source edits keep the existing LSP synchronization path. The walk is bounded by
+64 packages and 128 KiB per metadata file and respects protected paths. An
+outside-workspace path dependency is refused by this recipe. The dependency
+snapshot detects invalidation inputs, not a transactional project revision.
+
+`hint` is one line included in capability discovery for sessions that configure
+this server. It tells the model to qualify a name
 with its module as imported (`probe.greet`), or `pkg/mod.name` for a
 nested module. `qualifier_separators` and `module_case` are not set: the
 defaults, `.` and as-written, fit Gleam. The qualifier must end the
 definition's file path without its extension, so `util` matches
 `src/util.gleam` and a nested `pkg/mod` matches `src/pkg/mod.gleam`.
 
-The network is off in every jail, so the server cannot fetch packages. A
-project with dependencies needs them fetched before the session starts.
+The long-running server is offline. The approved setup recipe prepares its
+dependencies before that lease starts, including in a fresh worktree.
 
 ### `[[check]]`
 
@@ -108,11 +129,10 @@ Loom's tools use, and a list of the sites the answer must equal. Sites
 are fixture-relative `path:line`, compared as a set, so two hits on one
 line count once and order does not matter. This profile has two:
 
-- **`definition` of `util.greet`, expecting `src/util.gleam:1`.** It
-  proves that the server starts under the jail's policy and compiles the
-  project (which is why `project` is writable), that Loom's bare-name
-  search finds the candidate sites, and that the qualifier `util` narrows
-  them to the right module.
+- **`definition` of `greet` at `src/util.gleam:1`, expecting that same
+  site.** It proves that the server starts under the jail’s policy and
+  compiles the prepared project. The supplied path and line avoid a
+  separate search dependency in the installation check.
 - **`references` of `greet`, asked from `src/util.gleam` line 1, expecting
   `src/util.gleam:1`, `src/util.gleam:6` and `src/fixture.gleam:4`.** That
   is the declaration, the two calls in `twice` on line 6 of its own
@@ -122,11 +142,11 @@ line count once and order does not matter. This profile has two:
 
 ## The fixture
 
-`fixture/` is a Gleam project with no dependencies. `src/util.gleam`
+`fixture/` is a Gleam project with a pinned `gleam_stdlib` dependency. `src/util.gleam`
 declares `greet` on line 1 and `twice` on line 5, whose body calls
 `greet` twice on line 6. `src/fixture.gleam` imports `util` and calls
-`util.greet` twice on line 4. With no dependencies the server needs no
-network. The checks assert line numbers, so editing a fixture file means
+`util.greet` twice on line 4. Setup downloads the pinned dependency; the
+server then runs offline. The checks assert line numbers, so editing a fixture file means
 updating `expect`.
 
 ## What the CI does
